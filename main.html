@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Супер крестики-нолики</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #1f2937;
+    --muted: #9ca3af;
+    --line: #e5e7eb;
+    --line-strong: #d1d5db;
+    --x: #2563eb;
+    --o: #dc2626;
+    --x-soft: #eff4ff;
+    --o-soft: #fef2f2;
+    --accent: #111827;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 16px 40px;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* ---------- Шапка ---------- */
+
+  header { text-align: center; margin-bottom: 18px; }
+
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .subtitle {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ---------- Панель статуса ---------- */
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+    font-size: 15px;
+  }
+
+  .turn-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    font-weight: 600;
+    background: #fafafa;
+    transition: border-color .25s, background .25s;
+  }
+
+  .turn-chip .mark { font-size: 18px; line-height: 1; }
+  .turn-chip.x { border-color: var(--x); background: var(--x-soft); }
+  .turn-chip.o { border-color: var(--o); background: var(--o-soft); }
+
+  /* ---------- Уведомление ---------- */
+
+  .toast {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translate(-50%, -12px);
+    padding: 10px 20px;
+    border-radius: 10px;
+    border: 1px solid var(--line-strong);
+    background: #111827;
+    color: #fff;
+    font-size: 14px;
+    box-shadow: 0 6px 18px rgba(17, 24, 39, .18);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .22s, transform .22s;
+    z-index: 10;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  /* ---------- Игровое поле ---------- */
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    padding: 10px;
+    border: 2px solid var(--line-strong);
+    border-radius: 14px;
+    background: #fdfdfe;
+    width: min(92vw, 540px);
+    aspect-ratio: 1 / 1;
+  }
+
+  .mini {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    min-width: 0;
+    min-height: 0;
+    gap: 2px;
+    background: var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: box-shadow .25s;
+  }
+
+  /* Подсветка активного мини-поля */
+  .mini.active {
+    box-shadow: 0 0 0 2px var(--accent) inset;
+    border-radius: 8px;
+  }
+  .mini.active.x-turn { box-shadow: 0 0 0 2px var(--x) inset; }
+  .mini.active.o-turn { box-shadow: 0 0 0 2px var(--o) inset; }
+
+  .mini.done { cursor: default; }
+  .mini.done::before {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(34px, 8vw, 52px);
+    font-weight: 700;
+    background: rgba(255, 255, 255, .82);
+    z-index: 2;
+  }
+  .mini.done[data-winner="X"]::before { content: "✕"; color: var(--x); }
+  .mini.done[data-winner="O"]::before { content: "◯"; color: var(--o); }
+  .mini.done[data-winner="-"] { opacity: .55; }
+  .mini.done[data-winner="-"]::before { content: "—"; color: var(--muted); font-weight: 400; }
+
+  .cell {
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+    min-height: 0;
+    line-height: 1;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(16px, 3.4vw, 24px);
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s;
+  }
+
+  .cell.x { color: var(--x); cursor: default; }
+  .cell.o { color: var(--o); cursor: default; }
+
+  .cell.free:hover::after {
+    content: attr(data-ghost);
+    position: absolute;
+    opacity: .25;
+  }
+  .mini.done .cell { cursor: default; }
+  .mini.done .cell:hover::after { content: none; }
+
+  /* ---------- Анимация постановки метки ---------- */
+
+  @keyframes cell-pop {
+    0%   { transform: scale(0.25); opacity: 0; }
+    60%  { transform: scale(1.25); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .cell.pop { animation: cell-pop .28s ease-out; }
+
+  @keyframes mini-pulse {
+    0%   { transform: scale(1); }
+    45%  { transform: scale(0.955); }
+    100% { transform: scale(1); }
+  }
+  .mini.pulse { animation: mini-pulse .3s ease-out; }
+
+  /* Выигрышная линия внутри мини-поля */
+  .cell.win-cell { background: #f9fafb; }
+
+  /* Выигранные мини-поля в глобальной линии */
+  .mini.win-board { box-shadow: 0 0 0 3px currentColor inset; }
+  .mini.win-board[data-winner="X"] { color: var(--x); }
+  .mini.win-board[data-winner="O"] { color: var(--o); }
+
+  .board.finished { pointer-events: none; }
+  .board.finished .mini.active { box-shadow: none; }
+
+  /* ---------- Управление ---------- */
+
+  .controls {
+    margin-top: 18px;
+    display: flex;
+    gap: 10px;
+  }
+
+  button {
+    font: inherit;
+    font-size: 14px;
+    padding: 9px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #f3f4f6; }
+  button:active { background: #e5e7eb; }
+  button.primary {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
+  }
+  button.primary:hover { background: #374151; }
+
+  /* ---------- Итог ---------- */
+
+  .result {
+    display: none;
+    margin-top: 18px;
+    padding: 14px 28px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: #fafafa;
+    text-align: center;
+  }
+  .result.show { display: block; }
+  .result .big { font-size: 20px; font-weight: 700; }
+  .result .big .x { color: var(--x); }
+  .result .big .o { color: var(--o); }
+  .result .small { margin-top: 4px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Супер крестики-нолики</h1>
+  <p class="subtitle">Девять полей 3×3 — победа берётся линией из выигранных полей</p>
+</header>
+
+<div class="status">
+  <span class="turn-chip x" id="turnChip"><span class="mark" id="turnMark">✕</span><span id="turnText">Ходят крестики</span></span>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="board" id="board" aria-label="Игровое поле"></div>
+
+<div class="controls">
+  <button class="primary" id="restartBtn">Новая игра</button>
+  <button id="resetScoreBtn">Сбросить счёт</button>
+</div>
+
+<div class="result" id="result">
+  <div class="big" id="resultTitle"></div>
+  <div class="small" id="resultSub"></div>
+</div>
+
+<div class="board" id="board" aria-label="Игровое поле"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  const LINES = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],   // строки
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],   // столбцы
+    [0, 4, 8], [2, 4, 6]               // диагонали
+  ];
+
+  const boardEl   = document.getElementById("board");
+  const turnChip  = document.getElementById("turnChip");
+  const turnMark  = document.getElementById("turnMark");
+  const turnText  = document.getElementById("turnText");
+  const toastEl   = document.getElementById("toast");
+  let toastTimer = null;
+
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.remove("show");
+    void toastEl.offsetWidth; // перезапуск анимации
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1800);
+  }
+  const resultEl  = document.getElementById("result");
+  const resultTitle = document.getElementById("resultTitle");
+  const resultSub   = document.getElementById("resultSub");
+  const restartBtn   = document.getElementById("restartBtn");
+  const resetScoreBtn = document.getElementById("resetScoreBtn");
+
+  // Состояние партии
+  let boards, winners, winLines, finishedBoards, current, forcedBoard, gameOver, winBoardIdxs;
+  // Счёт между партиями
+  let score = { X: 0, O: 0, D: 0 };
+
+  const GLYPH = { X: "✕", O: "◯" };
+  const NAME  = { X: "крестики", O: "нолики" };
+
+  /* ---------- Логика ---------- */
+
+  function findLine(cells, player) {
+    for (const line of LINES) {
+      if (cells[line[0]] === player && cells[line[1]] === player && cells[line[2]] === player) {
+        return line;
+      }
+    }
+    return null;
+  }
+
+  function newGame() {
+    boards = Array.from({ length: 9 }, () => Array(9).fill(null));
+    winners = Array(9).fill(null);       // null | 'X' | 'O' | 'draw'
+    winLines = Array(9).fill(null);      // индексы клеток линии внутри мини-поля
+    finishedBoards = new Set();
+    current = "X";
+    forcedBoard = null;                  // null = свободный выбор
+    gameOver = false;
+    winBoardIdxs = null;
+    resultEl.classList.remove("show");
+    buildBoard();
+    render();
+  }
+
+  function playMove(bIdx, cIdx) {
+    if (gameOver) return;
+    if (finishedBoards.has(bIdx) ||
+        (forcedBoard !== null && bIdx !== forcedBoard) ||
+        boards[bIdx][cIdx] !== null) {
+      showToast("Вы сделали невозможный ход");
+      return;
+    }
+
+    boards[bIdx][cIdx] = current;
+
+    // Анимация постановки метки: клетка «выпрыгивает», мини-поле подаётся
+    const placed = boardEl.children[bIdx].children[cIdx];
+    placed.classList.remove("pop");
+    void placed.offsetWidth;
+    placed.classList.add("pop");
+    const miniEl = boardEl.children[bIdx];
+    miniEl.classList.remove("pulse");
+    void miniEl.offsetWidth;
+    miniEl.classList.add("pulse");
+
+    // Результат мини-поля
+    let line = findLine(boards[bIdx], current);
+    if (line) {
+      winners[bIdx] = current;
+      winLines[bIdx] = line;
+      finishedBoards.add(bIdx);
+    } else if (boards[bIdx].every(v => v !== null)) {
+      winners[bIdx] = "draw";
+      finishedBoards.add(bIdx);
+    }
+
+    // Глобальная победа
+    const gLine = findLine(winners, current);
+    if (gLine) {
+      gameOver = true;
+      winBoardIdxs = gLine;
+      score[current]++;
+      finishGame(current, gLine);
+      render();
+      return;
+    }
+
+    // Ничья: все поля завершены
+    if (finishedBoards.size === 9) {
+      gameOver = true;
+      score.D++;
+      finishGame(null, null);
+      render();
+      return;
+    }
+
+    // Куда обязан пойти соперник
+    const target = cIdx;
+    forcedBoard = finishedBoards.has(target) ? null : target;
+
+    current = (current === "X") ? "O" : "X";
+    render();
+  }
+
+  function finishGame(winner, gLine) {
+    resultEl.classList.add("show");
+    if (winner) {
+      resultTitle.innerHTML =
+        'Победили <span class="' + winner.toLowerCase() + '">' + GLYPH[winner] + " " + NAME[winner] + "</span>!";
+      resultSub.textContent = "Линия из трёх выигранных полей: поля " +
+        (gLine[0] + 1) + ", " + (gLine[1] + 1) + ", " + (gLine[2] + 1) +
+        ". Счёт: ✕ " + score.X + " — " + score.O + " ◯" +
+        (score.D ? " (ничьих: " + score.D + ")" : "");
+    } else {
+      resultTitle.textContent = "Ничья";
+      resultSub.textContent = "Все девять полей завершены, линии из трёх полей не собрано." +
+        " Счёт: ✕ " + score.X + " — " + score.O + " ◯" +
+        (score.D ? " (ничьих: " + score.D + ")" : "");
+    }
+  }
+
+  /* ---------- Отрисовка ---------- */
+
+  function buildBoard() {
+    boardEl.innerHTML = "";
+    boardEl.classList.remove("finished");
+    for (let b = 0; b < 9; b++) {
+      const mini = document.createElement("div");
+      mini.className = "mini";
+      mini.dataset.board = b;
+      for (let c = 0; c < 9; c++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.dataset.board = b;
+        cell.dataset.cell = c;
+        cell.addEventListener("click", () => playMove(b, c));
+        mini.appendChild(cell);
+      }
+      boardEl.appendChild(mini);
+    }
+  }
+
+  function render() {
+    // Счёт в подсказке-строке
+    for (let b = 0; b < 9; b++) {
+      const mini = boardEl.children[b];
+      const cells = mini.children;
+
+      const isDone = finishedBoards.has(b);
+      mini.classList.toggle("done", isDone);
+      if (isDone) {
+        mini.dataset.winner = winners[b] === "draw" ? "-" : winners[b];
+      } else {
+        delete mini.dataset.winner;
+      }
+
+      const inWinLine = winBoardIdxs && winBoardIdxs.includes(b);
+      mini.classList.toggle("win-board", !!inWinLine);
+
+      const active = !gameOver && !isDone && (forcedBoard === null || forcedBoard === b);
+      mini.classList.toggle("active", active);
+      mini.classList.toggle("x-turn", active && current === "X");
+      mini.classList.toggle("o-turn", active && current === "O");
+
+      const line = winLines[b];
+      for (let c = 0; c < 9; c++) {
+        const cellEl = cells[c];
+        const v = boards[b][c];
+        cellEl.textContent = v ? GLYPH[v] : "";
+        cellEl.classList.toggle("x", v === "X");
+        cellEl.classList.toggle("o", v === "O");
+        cellEl.classList.toggle("win-cell", !!line && line.includes(c));
+        const free = !gameOver && !isDone && v === null && (forcedBoard === null || forcedBoard === b);
+        if (free) {
+          cellEl.classList.add("free");
+          cellEl.dataset.ghost = GLYPH[current];
+        } else {
+          cellEl.classList.remove("free");
+          delete cellEl.dataset.ghost;
+        }
+      }
+    }
+
+    // Статусная строка
+    if (!gameOver) {
+      turnChip.classList.toggle("x", current === "X");
+      turnChip.classList.toggle("o", current === "O");
+      turnMark.textContent = GLYPH[current];
+      turnText.textContent = "Ходят " + NAME[current];
+      boardEl.classList.remove("finished");
+    } else {
+      boardEl.classList.add("finished");
+      turnChip.className = "turn-chip";
+      turnText.textContent = "Партия завершена";
+      turnMark.textContent = "";
+    }
+  }
+
+  /* ---------- События ---------- */
+
+  restartBtn.addEventListener("click", newGame);
+  resetScoreBtn.addEventListener("click", () => {
+    score = { X: 0, O: 0, D: 0 };
+    newGame();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "r" || e.key === "R" || e.key === "к" || e.key === "К") newGame();
+  });
+
+  newGame();
+})();
+</script>
+</body>
+</html>
